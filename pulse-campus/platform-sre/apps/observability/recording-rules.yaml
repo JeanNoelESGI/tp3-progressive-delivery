@@ -1,0 +1,42 @@
+# =============================================================================
+# recording-rules.yaml — Application ArgoCD pour les PrometheusRule SLI
+# Namespace : argocd
+#
+# Déploie le PrometheusRule `pulse-campus-sli-rules` dans le namespace
+# `monitoring`. Prometheus Operator le détecte grâce au label `release: kps`
+# et charge les recording rules automatiquement.
+#
+# Étape 2 du TP (créé en étape 3 pour que l'Application soit dans l'App of Apps).
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: recording-rules
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: devhub
+
+  source:
+    # TODO : remplacez par l'URL HTTPS de votre fork.
+    repoURL: https://github.com/JeanNoelESGI/tp3-progressive-delivery.git
+    targetRevision: main
+    # Déploie tous les fichiers YAML du répertoire recording-rules
+    path: pulse-campus/platform-sre/recording-rules
+
+    directory:
+      recurse: false
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+
+  syncPolicy:
+    automated:
+      prune: true      # supprime les règles retirées du repo
+      selfHeal: true   # re-applique si quelqu'un modifie manuellement
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

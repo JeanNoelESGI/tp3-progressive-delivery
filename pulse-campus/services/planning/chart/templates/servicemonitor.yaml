@@ -1,0 +1,30 @@
+{{- /*
+  ServiceMonitor — planning
+  Activé via monitoring.enabled: true dans values.yaml (ou values-dev.yaml).
+
+  Même pattern que le ServiceMonitor annuaire.
+  Label `release: kps` OBLIGATOIRE pour la découverte par Prometheus Operator.
+*/ -}}
+{{- if .Values.monitoring.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "planning.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "planning.labels" . | nindent 4 }}
+    release: {{ .Values.monitoring.serviceMonitor.release | quote }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "planning.selectorLabels" . | nindent 6 }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+      scrapeTimeout: 10s
+      honorLabels: false
+{{- end }}

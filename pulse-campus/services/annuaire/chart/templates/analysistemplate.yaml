@@ -1,0 +1,63 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ include "annuaire.fullname" . }}-analysis
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "annuaire.labels" . | nindent 4 }}
+spec:
+  args:
+    - name: canary-hash
+      # Le hash est passé dynamiquement depuis les étapes du Rollout
+  metrics:
+    # ── Métrique 1 : Taux d'erreur 5xx (SLO Disponibilité) ────────────────────
+    - name: error-rate
+      interval: 30s
+      count: 10
+      # successCondition : taux d'erreur strictement inférieur à 1 % (0.01)
+      successCondition: result[0] < 0.01
+      # n'autoriser aucun échec : la moindre erreur systématique provoque le rollback immédiat
+      failureLimit: 0
+      provider:
+        prometheus:
+          # Connexion au service interne Prometheus Operator
+          address: http://prometheus-operated.monitoring.svc.cluster.local:9090
+          query: |
+            (
+              sum(rate(http_requests_total{
+                job="annuaire",
+                status_class="5xx",
+                rollouts_pod_template_hash="{{args.canary-hash}}",
+                route!~"/healthz|/readyz|/metrics"
+              }[2m]))
+              /
+              sum(rate(http_requests_total{
+                job="annuaire",
+                rollouts_pod_template_hash="{{args.canary-hash}}",
+                route!~"/healthz|/readyz|/metrics"
+              }[2m]))
+            ) or vector(0)
+
+    # ── Métrique 2 : Latence p95 (SLO Performance) ───────────────────────────
+    - name: latency-p95
+      interval: 30s
+      count: 10
+      # successCondition : p95 inférieur au seuil SLO de 300 ms (0.3 s)
+      successCondition: result[0] < 0.3
+      failureLimit: 0
+      provider:
+        prometheus:
+          address: http://prometheus-operated.monitoring.svc.cluster.local:9090
+          query: |
+            (
+              histogram_quantile(
+                0.95,
+                sum by (le) (
+                  rate(http_request_duration_seconds_bucket{
+                    job="annuaire",
+                    rollouts_pod_template_hash="{{args.canary-hash}}",
+                    route!~"/healthz|/readyz|/metrics"
+                  }[2m])
+                )
+              )
+            ) or vector(0)

@@ -1,0 +1,619 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pulse-campus-red-slo-dashboard
+  namespace: monitoring
+  labels:
+    # Label détecté par le sidecar Grafana (cf. kube-prometheus-stack-values.yaml)
+    grafana_dashboard: "1"
+    grafana_dashboard_folder: "Pulse Campus"
+    app.kubernetes.io/part-of: devhub-campus
+    app.kubernetes.io/component: grafana-dashboard
+data:
+  pulse-campus-red-slo.json: |
+    {
+      "title": "Pulse Campus — RED & SLO",
+      "uid": "pulse-campus-red-slo-v1",
+      "description": "RED metrics (Rate, Errors, Duration) + SLO burn rate + Build info pour les 3 services DevHub Campus.",
+      "schemaVersion": 38,
+      "version": 1,
+      "refresh": "30s",
+      "time": { "from": "now-1h", "to": "now" },
+      "timezone": "browser",
+      "tags": ["pulse-campus", "sre", "red", "slo"],
+      "graphTooltip": 1,
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "label": "Datasource",
+            "type": "datasource",
+            "pluginId": "prometheus",
+            "multi": false,
+            "includeAll": false,
+            "hide": 0
+          },
+          {
+            "name": "job",
+            "label": "Service",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${datasource}" },
+            "definition": "label_values(http_requests_total, job)",
+            "query": { "query": "label_values(http_requests_total, job)", "refId": "StandardVariableQuery" },
+            "multi": true,
+            "includeAll": true,
+            "allValue": "annuaire|planning|notif",
+            "sort": 1,
+            "hide": 0,
+            "refresh": 2
+          }
+        ]
+      },
+      "panels": [
+
+        {
+          "id": 1,
+          "type": "row",
+          "title": "📊 Overview",
+          "collapsed": false,
+          "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 }
+        },
+
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "RPS Total",
+          "description": "Débit total toutes requêtes (hors probes), tous services sélectionnés.",
+          "gridPos": { "x": 0, "y": 1, "w": 6, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "textMode": "auto"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 100 },
+                  { "color": "red", "value": 500 }
+                ]
+              }
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum(sli:http_requests_total:rate5m{job=~\"$job\"})",
+              "legendFormat": "RPS total",
+              "refId": "A"
+            }
+          ]
+        },
+
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Taux d'erreur 5xx",
+          "description": "Proportion de requêtes 5xx (hors probes), tous services sélectionnés. Rouge si > 1 %.",
+          "gridPos": { "x": 6, "y": 1, "w": 6, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "colorMode": "background",
+            "graphMode": "area",
+            "orientation": "auto"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "decimals": 2,
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 0.001 },
+                  { "color": "red",    "value": 0.01  }
+                ]
+              },
+              "mappings": []
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum(sli:http_request_error_ratio:rate5m{job=~\"$job\"}) / count(sli:http_request_error_ratio:rate5m{job=~\"$job\"})",
+              "legendFormat": "Error ratio",
+              "refId": "A"
+            }
+          ]
+        },
+
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Burn Rate annuaire (1 h)",
+          "description": "Vitesse de consommation de l'Error Budget annuaire. BR > 14.4 = PAGE urgente.",
+          "gridPos": { "x": 12, "y": 1, "w": 6, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "colorMode": "background",
+            "graphMode": "area",
+            "orientation": "auto"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "decimals": 1,
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green",  "value": null },
+                  { "color": "yellow", "value": 6    },
+                  { "color": "red",    "value": 14.4 }
+                ]
+              }
+            }
+          },
+          "targets": [
+            {
+              "expr": "slo:http_burn_rate_1h:annuaire",
+              "legendFormat": "BR 1h",
+              "refId": "A"
+            }
+          ]
+        },
+
+        {
+          "id": 5,
+          "type": "table",
+          "title": "Build Info",
+          "description": "Métadonnées de release pour chaque service. Vaut toujours 1 (gauge constante).",
+          "gridPos": { "x": 18, "y": 1, "w": 6, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "options": {
+            "showHeader": true,
+            "footer": { "show": false }
+          },
+          "fieldConfig": {
+            "defaults": { "custom": { "align": "auto" } },
+            "overrides": [
+              { "matcher": { "id": "byName", "options": "Value" }, "properties": [{ "id": "custom.hidden", "value": true }] },
+              { "matcher": { "id": "byName", "options": "Time"  }, "properties": [{ "id": "custom.hidden", "value": true }] }
+            ]
+          },
+          "targets": [
+            {
+              "expr": "{__name__=~\"annuaire_build_info|planning_build_info|notif_build_info\"}",
+              "legendFormat": "",
+              "refId": "A",
+              "instant": true,
+              "format": "table"
+            }
+          ],
+          "transformations": [
+            { "id": "labelsToFields", "options": { "mode": "columns" } },
+            { "id": "organize", "options": {
+                "renameByName": { "job": "Service", "version": "Version", "commit": "Commit", "language": "Lang" },
+                "excludeByName": { "__name__": true, "instance": true, "namespace": true, "pod": true, "container": true }
+            }}
+          ]
+        },
+
+        {
+          "id": 10,
+          "type": "row",
+          "title": "📈 Rate — Débit (RPS)",
+          "collapsed": false,
+          "gridPos": { "x": 0, "y": 5, "w": 24, "h": 1 }
+        },
+
+        {
+          "id": 11,
+          "type": "timeseries",
+          "title": "Request Rate par service (RPS)",
+          "description": "Nombre de requêtes par seconde (hors /healthz, /readyz, /metrics). Utilise la recording rule sli:http_requests_total:rate5m.",
+          "gridPos": { "x": 0, "y": 6, "w": 24, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "options": {
+            "tooltip": { "mode": "multi", "sort": "desc" },
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "spanNulls": false
+              }
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum by (job) (sli:http_requests_total:rate5m{job=~\"$job\"})",
+              "legendFormat": "{{job}}",
+              "refId": "A"
+            }
+          ]
+        },
+
+        {
+          "id": 20,
+          "type": "row",
+          "title": "🚨 Errors — Taux d'erreur 5xx",
+          "collapsed": false,
+          "gridPos": { "x": 0, "y": 14, "w": 24, "h": 1 }
+        },
+
+        {
+          "id": 21,
+          "type": "timeseries",
+          "title": "Taux d'erreur 5xx par service (%)",
+          "description": "Proportion de requêtes 5xx en %. Ligne rouge = seuil SLO annuaire 0.1% (=100% - 99.9%). Utilise sli:http_request_error_ratio:rate5m.",
+          "gridPos": { "x": 0, "y": 15, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "options": {
+            "tooltip": { "mode": "multi", "sort": "desc" },
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "decimals": 3,
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 10
+              },
+              "color": { "mode": "palette-classic" }
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "SLO budget annuaire (0.1%)" },
+                "properties": [
+                  { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } },
+                  { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [8, 4] } },
+                  { "id": "custom.lineWidth", "value": 1 }
+                ]
+              }
+            ]
+          },
+          "targets": [
+            {
+              "expr": "sum by (job) (sli:http_request_error_ratio:rate5m{job=~\"$job\"})",
+              "legendFormat": "{{job}}",
+              "refId": "A"
+            },
+            {
+              "expr": "vector(0.001)",
+              "legendFormat": "SLO budget annuaire (0.1%)",
+              "refId": "B",
+              "hide": false
+            }
+          ]
+        },
+
+        {
+          "id": 22,
+          "type": "timeseries",
+          "title": "SLO Burn Rate (1h et 6h)",
+          "description": "Burn rate = taux_erreur_observé / budget_erreur_SLO. Seuil page: 14.4 (1h), seuil ticket: 6 (6h).",
+          "gridPos": { "x": 12, "y": 15, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "options": {
+            "tooltip": { "mode": "multi", "sort": "desc" },
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "decimals": 1,
+              "custom": { "lineWidth": 2, "fillOpacity": 5 }
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byRegexp", "options": "PAGE.*" },
+                "properties": [
+                  { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } },
+                  { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 4] } },
+                  { "id": "custom.lineWidth", "value": 1 }
+                ]
+              },
+              {
+                "matcher": { "id": "byRegexp", "options": "TICKET.*" },
+                "properties": [
+                  { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } },
+                  { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [6, 4] } },
+                  { "id": "custom.lineWidth", "value": 1 }
+                ]
+              }
+            ]
+          },
+          "targets": [
+            { "expr": "slo:http_burn_rate_1h:annuaire",  "legendFormat": "annuaire BR 1h",  "refId": "A" },
+            { "expr": "slo:http_burn_rate_6h:annuaire",  "legendFormat": "annuaire BR 6h",  "refId": "B" },
+            { "expr": "slo:http_burn_rate_1h:planning",  "legendFormat": "planning BR 1h",  "refId": "C" },
+            { "expr": "slo:http_burn_rate_6h:planning",  "legendFormat": "planning BR 6h",  "refId": "D" },
+            { "expr": "slo:http_burn_rate_1h:notif",     "legendFormat": "notif BR 1h",     "refId": "E" },
+            { "expr": "slo:http_burn_rate_6h:notif",     "legendFormat": "notif BR 6h",     "refId": "F" },
+            { "expr": "vector(14.4)", "legendFormat": "PAGE (14.4)",   "refId": "G" },
+            { "expr": "vector(6)",    "legendFormat": "TICKET (6.0)",  "refId": "H" }
+          ]
+        },
+
+        {
+          "id": 30,
+          "type": "row",
+          "title": "⏱️ Duration — Latence p50 / p95 / p99",
+          "collapsed": false,
+          "gridPos": { "x": 0, "y": 23, "w": 24, "h": 1 }
+        },
+
+        {
+          "id": 31,
+          "type": "timeseries",
+          "title": "Latence p50 / p95 / p99 — annuaire (SLO : p95 < 300 ms)",
+          "description": "Agrégation correcte : sum by (le) PUIS histogram_quantile. Ligne rouge = seuil SLO 300 ms.",
+          "gridPos": { "x": 0, "y": 24, "w": 8, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "options": {
+            "tooltip": { "mode": "multi", "sort": "desc" },
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "decimals": 3,
+              "custom": { "lineWidth": 2, "fillOpacity": 5 }
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "SLO 300ms" },
+                "properties": [
+                  { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } },
+                  { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [8, 4] } },
+                  { "id": "custom.lineWidth", "value": 1 }
+                ]
+              }
+            ]
+          },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"annuaire\", route!~\"/healthz|/readyz|/metrics\"}[5m])))",
+              "legendFormat": "p50",
+              "refId": "A"
+            },
+            {
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"annuaire\", route!~\"/healthz|/readyz|/metrics\"}[5m])))",
+              "legendFormat": "p95",
+              "refId": "B"
+            },
+            {
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"annuaire\", route!~\"/healthz|/readyz|/metrics\"}[5m])))",
+              "legendFormat": "p99",
+              "refId": "C"
+            },
+            { "expr": "vector(0.3)", "legendFormat": "SLO 300ms", "refId": "D" }
+          ]
+        },
+
+        {
+          "id": 32,
+          "type": "timeseries",
+          "title": "Latence p50 / p95 / p99 — planning (SLO : p95 < 500 ms)",
+          "description": "Agrégation correcte : sum by (le) PUIS histogram_quantile. Ligne rouge = seuil SLO 500 ms.",
+          "gridPos": { "x": 8, "y": 24, "w": 8, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "options": {
+            "tooltip": { "mode": "multi", "sort": "desc" },
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "decimals": 3,
+              "custom": { "lineWidth": 2, "fillOpacity": 5 }
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "SLO 500ms" },
+                "properties": [
+                  { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } },
+                  { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [8, 4] } },
+                  { "id": "custom.lineWidth", "value": 1 }
+                ]
+              }
+            ]
+          },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"planning\", route!~\"/healthz|/readyz|/metrics\"}[5m])))",
+              "legendFormat": "p50",
+              "refId": "A"
+            },
+            {
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"planning\", route!~\"/healthz|/readyz|/metrics\"}[5m])))",
+              "legendFormat": "p95",
+              "refId": "B"
+            },
+            {
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"planning\", route!~\"/healthz|/readyz|/metrics\"}[5m])))",
+              "legendFormat": "p99",
+              "refId": "C"
+            },
+            { "expr": "vector(0.5)", "legendFormat": "SLO 500ms", "refId": "D" }
+          ]
+        },
+
+        {
+          "id": 33,
+          "type": "timeseries",
+          "title": "Latence p50 / p95 / p99 — notif (SLO : p95 < 200 ms)",
+          "description": "Agrégation correcte : sum by (le) PUIS histogram_quantile. Ligne rouge = seuil SLO 200 ms.",
+          "gridPos": { "x": 16, "y": 24, "w": 8, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "options": {
+            "tooltip": { "mode": "multi", "sort": "desc" },
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "decimals": 3,
+              "custom": { "lineWidth": 2, "fillOpacity": 5 }
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "SLO 200ms" },
+                "properties": [
+                  { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } },
+                  { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [8, 4] } },
+                  { "id": "custom.lineWidth", "value": 1 }
+                ]
+              }
+            ]
+          },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"notif\", route!~\"/healthz|/readyz|/metrics\"}[5m])))",
+              "legendFormat": "p50",
+              "refId": "A"
+            },
+            {
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"notif\", route!~\"/healthz|/readyz|/metrics\"}[5m])))",
+              "legendFormat": "p95",
+              "refId": "B"
+            },
+            {
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"notif\", route!~\"/healthz|/readyz|/metrics\"}[5m])))",
+              "legendFormat": "p99",
+              "refId": "C"
+            },
+            { "expr": "vector(0.2)", "legendFormat": "SLO 200ms", "refId": "D" }
+          ]
+        },
+
+        {
+          "id": 40,
+          "type": "row",
+          "title": "✅ SLI Latence — Proportion sous le seuil SLO",
+          "collapsed": false,
+          "gridPos": { "x": 0, "y": 32, "w": 24, "h": 1 }
+        },
+
+        {
+          "id": 41,
+          "type": "gauge",
+          "title": "SLI Latence annuaire (< 300 ms)",
+          "description": "Proportion exacte de requêtes sous le seuil SLO. Utilise la lecture directe du bucket le=0.3 (plus précis qu'histogram_quantile). Source: sli:http_latency_under_slo:annuaire.",
+          "gridPos": { "x": 0, "y": 33, "w": 8, "h": 6 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "showThresholdLabels": false,
+            "showThresholdMarkers": true,
+            "minVizWidth": 75,
+            "minVizHeight": 75
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0.9,
+              "max": 1,
+              "decimals": 4,
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "red",    "value": null  },
+                  { "color": "yellow", "value": 0.95  },
+                  { "color": "green",  "value": 0.999 }
+                ]
+              },
+              "mappings": []
+            }
+          },
+          "targets": [
+            { "expr": "sli:http_latency_under_slo:annuaire", "legendFormat": "annuaire", "refId": "A", "instant": true }
+          ]
+        },
+
+        {
+          "id": 42,
+          "type": "gauge",
+          "title": "SLI Latence planning (< 500 ms)",
+          "description": "Proportion exacte de requêtes sous le seuil SLO. Bucket le=0.5.",
+          "gridPos": { "x": 8, "y": 33, "w": 8, "h": 6 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "showThresholdMarkers": true
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0.9,
+              "max": 1,
+              "decimals": 4,
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "red",    "value": null  },
+                  { "color": "yellow", "value": 0.95  },
+                  { "color": "green",  "value": 0.995 }
+                ]
+              }
+            }
+          },
+          "targets": [
+            { "expr": "sli:http_latency_under_slo:planning", "legendFormat": "planning", "refId": "A", "instant": true }
+          ]
+        },
+
+        {
+          "id": 43,
+          "type": "gauge",
+          "title": "SLI Latence notif (< 200 ms)",
+          "description": "Proportion exacte de requêtes sous le seuil SLO. Bucket le=0.2.",
+          "gridPos": { "x": 16, "y": 33, "w": 8, "h": 6 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "showThresholdMarkers": true
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0.9,
+              "max": 1,
+              "decimals": 4,
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "red",    "value": null  },
+                  { "color": "yellow", "value": 0.95  },
+                  { "color": "green",  "value": 0.995 }
+                ]
+              }
+            }
+          },
+          "targets": [
+            { "expr": "sli:http_latency_under_slo:notif", "legendFormat": "notif", "refId": "A", "instant": true }
+          ]
+        }
+
+      ]
+    }

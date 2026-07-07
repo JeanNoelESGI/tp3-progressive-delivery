@@ -1,0 +1,169 @@
+# =============================================================================
+# slo-definitions.yaml — Matrice SLI/SLO/Error Budget — Pulse Campus TP3
+# =============================================================================
+#
+# Ce fichier est la SOURCE DE VÉRITÉ des SLO pour les 3 services.
+# Il n'est PAS un CRD Kubernetes : c'est un référentiel documentaire consommé
+# par les PrometheusRule (étape 10) et les AnalysisTemplate (étape 7).
+#
+# Convention de nommage :
+#   service       : nom Kubernetes du service (label app.kubernetes.io/name)
+#   sli_*         : définitions SLI (ce qu'on mesure)
+#   slo_*         : objectifs SLO (ce à quoi on s'engage)
+#   error_budget_* : budget d'erreur dérivé
+#
+# Fenêtre glissante de référence : 30 jours (2 592 000 secondes)
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # SERVICE : annuaire (Node.js / Express)
+  # Criticité : HAUTE — annuaire étudiant, consulté en permanence par l'UI
+  # Routes : GET /students, GET /students/:id, POST /students
+  # ---------------------------------------------------------------------------
+  - name: annuaire
+    language: nodejs
+    namespace: dev
+    criticality: high
+
+    sli:
+      # SLI-1 : Disponibilité
+      # Définition : proportion de requêtes non-5xx sur la totalité des requêtes
+      # Métrique source : http_requests_total{status_class!="5xx"} / http_requests_total
+      availability:
+        description: "Ratio de requêtes HTTP ayant reçu une réponse non-5xx"
+        good_events:   "http_requests_total{job='annuaire', status_class!='5xx'}"
+        total_events:  "http_requests_total{job='annuaire'}"
+        # Exclusions : /healthz et /readyz sont exclues (probes Kubernetes,
+        # non représentatives du trafic utilisateur)
+        exclude_routes: ["/healthz", "/readyz", "/metrics"]
+
+      # SLI-2 : Latence
+      # Définition : proportion de requêtes répondant en moins de 300 ms
+      # Métrique source : http_request_duration_seconds_bucket{le="0.3"}
+      latency:
+        description: "Proportion de requêtes répondues en < 300 ms (SLO bound)"
+        threshold_ms: 300
+        percentile_target: p95
+        histogram_metric: "http_request_duration_seconds_bucket"
+        # bucket <= 0.3 doit exister dans les buckets configurés (étape 2)
+
+    slo:
+      # SLO-1 : Disponibilité 99.9 % sur 30 jours
+      availability:
+        target_percent: 99.9
+        window_days: 30
+        error_budget_minutes: 43.2    # 30d * 24h * 60min * (1-0.999) = 43.2 min
+        burn_rate_1h_critical: 14.4   # consomme 2 % du budget en 1 h → page
+        burn_rate_6h_warning:   6.0   # consomme 5 % du budget en 6 h → ticket
+
+      # SLO-2 : Latence p95 < 300 ms sur 30 jours
+      latency_p95:
+        target_percent: 95.0          # 95 % des requêtes en < 300 ms
+        threshold_ms: 300
+        window_days: 30
+
+    error_budget:
+      monthly_allowed_downtime_min: 43.2
+      monthly_allowed_downtime_sec: 2592
+      # Alert threshold : brûle > 5 % du budget/h = burn_rate > 5
+      fast_burn_threshold: 14.4
+      slow_burn_threshold:  6.0
+
+  # ---------------------------------------------------------------------------
+  # SERVICE : planning (Python / FastAPI)
+  # Criticité : HAUTE — gestion des créneaux de salles, usage intensif agenda
+  # Routes : GET /slots, GET /slots/{slot_id}, POST /slots
+  # ---------------------------------------------------------------------------
+  - name: planning
+    language: python
+    namespace: dev
+    criticality: high
+
+    sli:
+      availability:
+        description: "Ratio de requêtes HTTP ayant reçu une réponse non-5xx"
+        good_events:  "http_requests_total{job='planning', status_class!='5xx'}"
+        total_events: "http_requests_total{job='planning'}"
+        exclude_routes: ["/healthz", "/readyz", "/metrics"]
+
+      latency:
+        description: "Proportion de requêtes répondues en < 500 ms (SLO bound)"
+        threshold_ms: 500
+        percentile_target: p95
+        histogram_metric: "http_request_duration_seconds_bucket"
+        # Python/FastAPI ajoute un overhead de démarrage ASGI non négligeable
+        # → seuil 500 ms vs 300 ms pour annuaire/notif
+
+    slo:
+      availability:
+        target_percent: 99.5
+        window_days: 30
+        error_budget_minutes: 216.0   # 30d * 24h * 60min * (1-0.995) = 216 min
+        burn_rate_1h_critical: 14.4
+        burn_rate_6h_warning:   6.0
+
+      latency_p95:
+        target_percent: 95.0
+        threshold_ms: 500
+        window_days: 30
+
+    error_budget:
+      monthly_allowed_downtime_min: 216.0
+      monthly_allowed_downtime_sec: 12960
+      fast_burn_threshold: 14.4
+      slow_burn_threshold:  6.0
+
+  # ---------------------------------------------------------------------------
+  # SERVICE : notif (Go / net/http)
+  # Criticité : MOYENNE — notifications, tolérance légèrement plus haute
+  # Routes : GET /events, GET /events/:id, POST /events
+  # ---------------------------------------------------------------------------
+  - name: notif
+    language: go
+    namespace: dev
+    criticality: medium
+
+    sli:
+      availability:
+        description: "Ratio de requêtes HTTP ayant reçu une réponse non-5xx"
+        good_events:  "http_requests_total{job='notif', status_class!='5xx'}"
+        total_events: "http_requests_total{job='notif'}"
+        exclude_routes: ["/healthz", "/readyz", "/metrics"]
+
+      latency:
+        description: "Proportion de requêtes répondues en < 200 ms (SLO bound)"
+        threshold_ms: 200
+        percentile_target: p95
+        histogram_metric: "http_request_duration_seconds_bucket"
+        # Go net/http est le plus léger des 3 runtimes → SLO latence plus strict
+
+    slo:
+      availability:
+        target_percent: 99.5
+        window_days: 30
+        error_budget_minutes: 216.0
+        burn_rate_1h_critical: 14.4
+        burn_rate_6h_warning:   6.0
+
+      latency_p95:
+        target_percent: 95.0
+        threshold_ms: 200
+        window_days: 30
+
+    error_budget:
+      monthly_allowed_downtime_min: 216.0
+      monthly_allowed_downtime_sec: 12960
+      fast_burn_threshold: 14.4
+      slow_burn_threshold:  6.0
+
+# =============================================================================
+# SYNTHÈSE : Tableau récapitulatif
+# =============================================================================
+# Service    | Lang      | SLO Dispo | Latence SLO   | Budget/mois
+# -----------|-----------|-----------|---------------|------------------
+# annuaire   | Node.js   | 99.9 %    | p95 < 300 ms  | 43.2 min
+# planning   | Python    | 99.5 %    | p95 < 500 ms  | 216 min (3h36)
+# notif      | Go        | 99.5 %    | p95 < 200 ms  | 216 min (3h36)
+# =============================================================================

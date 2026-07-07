@@ -1,0 +1,390 @@
+# =============================================================================
+# recording-rules.yaml — PrometheusRule SLI Recording Rules
+# Namespace : monitoring
+# Label     : release: kps  (obligatoire pour le sélecteur kube-prometheus-stack)
+#
+# Ce fichier définit des recording rules pré-calculées pour les SLI de
+# disponibilité et de latence des 3 services. L'intérêt des recording rules :
+#   1) Accélèrent les dashboards Grafana (résultat pré-calculé, pas re-évalué).
+#   2) Permettent d'utiliser des fenêtres longues ([30d]) sans surcharger
+#      Prometheus à chaque évaluation de dashboard.
+#   3) Constituent la base des alertes de burn rate (étape 10).
+#
+# Validation locale (avant git push) :
+#   promtool check rules platform-sre/recording-rules/recording-rules.yaml
+#
+# Référence nomenclature recording rules Google SRE :
+#   <level>:<metric>:<labels_and_aggregations>
+#   - level   : "sli" (indicateur brut) ou "slo" (ratio normalisé)
+#   - metric  : nom de la métrique source agrégée
+#   - labels  : dimension d'agrégation conservée
+# =============================================================================
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: pulse-campus-sli-rules
+  namespace: monitoring
+  labels:
+    # OBLIGATOIRE : correspond au ruleSelector.matchLabels du chart kube-prometheus-stack.
+    # Sans ce label, Prometheus ne charge pas la règle.
+    release: kps
+    app.kubernetes.io/part-of: devhub-campus
+    app.kubernetes.io/component: sre-sli
+
+spec:
+  groups:
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Groupe 1 : Taux de requêtes (Rate) — fenêtre courte 5 min
+    # Interval d'évaluation : 30s (aligne sur le scrape interval)
+    # ─────────────────────────────────────────────────────────────────────────
+    - name: pulse_campus_rate_5m
+      interval: 30s
+      rules:
+
+        # Débit total par service (hors probes)
+        - record: sli:http_requests_total:rate5m
+          expr: |
+            sum without (pod, instance, node) (
+              rate(http_requests_total{
+                job=~"annuaire|planning|notif",
+                route!~"/healthz|/readyz|/metrics"
+              }[5m])
+            )
+
+        # Débit erreurs 5xx par service (hors probes)
+        - record: sli:http_requests_errors5xx:rate5m
+          expr: |
+            sum without (pod, instance, node) (
+              rate(http_requests_total{
+                job=~"annuaire|planning|notif",
+                status_class="5xx",
+                route!~"/healthz|/readyz|/metrics"
+              }[5m])
+            )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Groupe 2 : Taux d'erreur (Error Ratio) — fenêtres multi-burn-rate
+    # Utilisé par les alertes de burn rate (étape 10).
+    # ─────────────────────────────────────────────────────────────────────────
+    - name: pulse_campus_error_ratio
+      interval: 30s
+      rules:
+
+        # Ratio d'erreur 5xx — fenêtre 5 min (dashboard temps réel)
+        - record: sli:http_request_error_ratio:rate5m
+          expr: |
+            sli:http_requests_errors5xx:rate5m
+            /
+            sli:http_requests_total:rate5m
+
+        # Ratio d'erreur 5xx — fenêtre 1 h (fast burn rate)
+        - record: sli:http_request_error_ratio:rate1h
+          expr: |
+            sum without (pod, instance, node) (
+              rate(http_requests_total{
+                job=~"annuaire|planning|notif",
+                status_class="5xx",
+                route!~"/healthz|/readyz|/metrics"
+              }[1h])
+            )
+            /
+            sum without (pod, instance, node) (
+              rate(http_requests_total{
+                job=~"annuaire|planning|notif",
+                route!~"/healthz|/readyz|/metrics"
+              }[1h])
+            )
+
+        # Ratio d'erreur 5xx — fenêtre 6 h (slow burn rate)
+        - record: sli:http_request_error_ratio:rate6h
+          expr: |
+            sum without (pod, instance, node) (
+              rate(http_requests_total{
+                job=~"annuaire|planning|notif",
+                status_class="5xx",
+                route!~"/healthz|/readyz|/metrics"
+              }[6h])
+            )
+            /
+            sum without (pod, instance, node) (
+              rate(http_requests_total{
+                job=~"annuaire|planning|notif",
+                route!~"/healthz|/readyz|/metrics"
+              }[6h])
+            )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Groupe 3 : Burn Rate — pré-calculé par service
+    # burn_rate = error_ratio / (1 - slo_target)
+    # Les seuils SLO sont encodés en dur dans l'expression.
+    # ─────────────────────────────────────────────────────────────────────────
+    - name: pulse_campus_burn_rate
+      interval: 30s
+      rules:
+
+        # Burn rate 1 h — annuaire (SLO 99.9 % → budget_fraction = 0.001)
+        - record: slo:http_burn_rate_1h:annuaire
+          expr: |
+            (
+              sum without (pod, instance, node) (
+                rate(http_requests_total{
+                  job="annuaire",
+                  status_class="5xx",
+                  route!~"/healthz|/readyz|/metrics"
+                }[1h])
+              )
+              /
+              sum without (pod, instance, node) (
+                rate(http_requests_total{
+                  job="annuaire",
+                  route!~"/healthz|/readyz|/metrics"
+                }[1h])
+              )
+            ) / 0.001
+
+        # Burn rate 6 h — annuaire
+        - record: slo:http_burn_rate_6h:annuaire
+          expr: |
+            (
+              sum without (pod, instance, node) (
+                rate(http_requests_total{
+                  job="annuaire",
+                  status_class="5xx",
+                  route!~"/healthz|/readyz|/metrics"
+                }[6h])
+              )
+              /
+              sum without (pod, instance, node) (
+                rate(http_requests_total{
+                  job="annuaire",
+                  route!~"/healthz|/readyz|/metrics"
+                }[6h])
+              )
+            ) / 0.001
+
+        # Burn rate 1 h — planning (SLO 99.5 % → budget_fraction = 0.005)
+        - record: slo:http_burn_rate_1h:planning
+          expr: |
+            (
+              sum without (pod, instance, node) (
+                rate(http_requests_total{
+                  job="planning",
+                  status_class="5xx",
+                  route!~"/healthz|/readyz|/metrics"
+                }[1h])
+              )
+              /
+              sum without (pod, instance, node) (
+                rate(http_requests_total{
+                  job="planning",
+                  route!~"/healthz|/readyz|/metrics"
+                }[1h])
+              )
+            ) / 0.005
+
+        # Burn rate 6 h — planning
+        - record: slo:http_burn_rate_6h:planning
+          expr: |
+            (
+              sum without (pod, instance, node) (
+                rate(http_requests_total{
+                  job="planning",
+                  status_class="5xx",
+                  route!~"/healthz|/readyz|/metrics"
+                }[6h])
+              )
+              /
+              sum without (pod, instance, node) (
+                rate(http_requests_total{
+                  job="planning",
+                  route!~"/healthz|/readyz|/metrics"
+                }[6h])
+              )
+            ) / 0.005
+
+        # Burn rate 1 h — notif (SLO 99.5 % → budget_fraction = 0.005)
+        - record: slo:http_burn_rate_1h:notif
+          expr: |
+            (
+              sum without (pod, instance, node) (
+                rate(http_requests_total{
+                  job="notif",
+                  status_class="5xx",
+                  route!~"/healthz|/readyz|/metrics"
+                }[1h])
+              )
+              /
+              sum without (pod, instance, node) (
+                rate(http_requests_total{
+                  job="notif",
+                  route!~"/healthz|/readyz|/metrics"
+                }[1h])
+              )
+            ) / 0.005
+
+        # Burn rate 6 h — notif
+        - record: slo:http_burn_rate_6h:notif
+          expr: |
+            (
+              sum without (pod, instance, node) (
+                rate(http_requests_total{
+                  job="notif",
+                  status_class="5xx",
+                  route!~"/healthz|/readyz|/metrics"
+                }[6h])
+              )
+              /
+              sum without (pod, instance, node) (
+                rate(http_requests_total{
+                  job="notif",
+                  route!~"/healthz|/readyz|/metrics"
+                }[6h])
+              )
+            ) / 0.005
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Groupe 4 : SLI Latence — proportion de requêtes sous le seuil SLO
+    # Méthode bucket-based : plus précise que histogram_quantile pour un seuil fixe.
+    # Buckets requis : le seuil SLO DOIT être une frontière exacte du bucket.
+    # ─────────────────────────────────────────────────────────────────────────
+    - name: pulse_campus_latency_sli
+      interval: 30s
+      rules:
+
+        # SLI Latence annuaire — proportion requêtes < 300 ms
+        # Prérequis : bucket le="0.3" doit exister dans METRICS_BUCKETS.
+        - record: sli:http_latency_under_slo:annuaire
+          expr: |
+            sum without (pod, instance, node) (
+              rate(http_request_duration_seconds_bucket{
+                job="annuaire",
+                le="0.3",
+                route!~"/healthz|/readyz|/metrics"
+              }[5m])
+            )
+            /
+            sum without (pod, instance, node) (
+              rate(http_request_duration_seconds_count{
+                job="annuaire",
+                route!~"/healthz|/readyz|/metrics"
+              }[5m])
+            )
+
+        # SLI Latence planning — proportion requêtes < 500 ms
+        # Prérequis : bucket le="0.5" doit exister dans METRICS_BUCKETS.
+        - record: sli:http_latency_under_slo:planning
+          expr: |
+            sum without (pod, instance, node) (
+              rate(http_request_duration_seconds_bucket{
+                job="planning",
+                le="0.5",
+                route!~"/healthz|/readyz|/metrics"
+              }[5m])
+            )
+            /
+            sum without (pod, instance, node) (
+              rate(http_request_duration_seconds_count{
+                job="planning",
+                route!~"/healthz|/readyz|/metrics"
+              }[5m])
+            )
+
+        # SLI Latence notif — proportion requêtes < 200 ms
+        # Prérequis : bucket le="0.2" doit exister dans METRICS_BUCKETS.
+        - record: sli:http_latency_under_slo:notif
+          expr: |
+            sum without (pod, instance, node) (
+              rate(http_request_duration_seconds_bucket{
+                job="notif",
+                le="0.2",
+                route!~"/healthz|/readyz|/metrics"
+              }[5m])
+            )
+            /
+            sum without (pod, instance, node) (
+              rate(http_request_duration_seconds_count{
+                job="notif",
+                route!~"/healthz|/readyz|/metrics"
+              }[5m])
+            )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Groupe 5 : Règles d'alerte Prometheus (Alerting Rules) (Étape 10)
+    # Évalue les conditions de déclenchement d'alertes basées sur les SLOs.
+    # ─────────────────────────────────────────────────────────────────────────
+    - name: pulse_campus_alerting_rules
+      rules:
+
+        # ── Alerte 1 : Taux d'erreur élevé (Sévérité: page) ──────────────────
+        # Déclenchée si le taux d'erreur 5xx d'un service dépasse 1 % pendant 5 min.
+        # Idéal pour réveiller un SRE à 3h du matin (Incident Critique).
+        - alert: HTTPHighErrorRate
+          expr: sli:http_request_error_ratio:rate5m > 0.01
+          for: 5m
+          labels:
+            severity: page
+          annotations:
+            summary: "Taux d'erreur élevé détecté sur le service {{ $labels.job }}"
+            description: "Le taux d'erreur HTTP 5xx pour {{ $labels.job }} a dépassé 1 % (actuel : {{ $value | humanizePercentage }}) pendant plus de 5 minutes."
+
+        # ── Alerte 2 : Latence dégradée annuaire (Sévérité: ticket) ───────────
+        # Déclenchée si la latence p95 dépasse le seuil SLO (300 ms) pendant 30 min.
+        # Traitement non-urgent : attend le lundi matin.
+        - alert: HTTPAnnuaireLatencyDegraded
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (le) (
+                rate(http_request_duration_seconds_bucket{
+                  job="annuaire",
+                  route!~"/healthz|/readyz|/metrics"
+                }[5m])
+              )
+            ) > 0.3
+          for: 30m
+          labels:
+            severity: ticket
+          annotations:
+            summary: "Latence p95 dégradée sur le service annuaire"
+            description: "La latence p95 d'annuaire a dépassé son seuil SLO de 300 ms (actuelle : {{ $value | humanizeDuration }}) pendant plus de 30 minutes."
+
+        # ── Alerte 3 : Latence dégradée planning (Sévérité: ticket) ───────────
+        - alert: HTTPPlanningLatencyDegraded
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (le) (
+                rate(http_request_duration_seconds_bucket{
+                  job="planning",
+                  route!~"/healthz|/readyz|/metrics"
+                }[5m])
+              )
+            ) > 0.5
+          for: 30m
+          labels:
+            severity: ticket
+          annotations:
+            summary: "Latence p95 dégradée sur le service planning"
+            description: "La latence p95 de planning a dépassé son seuil SLO de 500 ms (actuelle : {{ $value | humanizeDuration }}) pendant plus de 30 minutes."
+
+        # ── Alerte 4 : Latence dégradée notif (Sévérité: ticket) ──────────────
+        - alert: HTTPNotifLatencyDegraded
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (le) (
+                rate(http_request_duration_seconds_bucket{
+                  job="notif",
+                  route!~"/healthz|/readyz|/metrics"
+                }[5m])
+              )
+            ) > 0.2
+          for: 30m
+          labels:
+            severity: ticket
+          annotations:
+            summary: "Latence p95 dégradée sur le service notif"
+            description: "La latence p95 de notif a dépassé son seuil SLO de 200 ms (actuelle : {{ $value | humanizeDuration }}) pendant plus de 30 minutes."
+

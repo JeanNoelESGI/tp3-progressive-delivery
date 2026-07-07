@@ -1,0 +1,15 @@
+# Surcharges pour l'environnement de développement (namespace devhub-dev).
+# Ne mettez ICI que ce qui diffère de values.yaml.
+
+ingress:
+  enabled: true
+  host: annuaire.devhub.local
+
+env:
+  LOG_LEVEL: debug
+
+# Étape 4 : ServiceMonitor activé.
+# Le label release: kps est obligatoire pour que Prometheus Operator
+# découvre ce ServiceMonitor (cf. serviceMonitorSelector dans kps values).
+monitoring:
+  enabled: true

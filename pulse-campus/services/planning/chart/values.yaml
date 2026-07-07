@@ -1,0 +1,77 @@
+# Values par défaut du chart planning.
+# Surchargées par values-dev.yaml selon l'environnement.
+
+image:
+  repository: ghcr.io/changeme/planning
+  tag: dev
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+
+ingress:
+  enabled: true
+  className: nginx
+  host: planning.devhub.local
+  path: /
+
+env:
+  LOG_LEVEL: info
+
+# Métriques Prometheus — paramètres injectés au pod via variables d'environnement.
+#
+# Buckets logarithmiques (Étape 2) :
+#   - Progression quasi-logarithmique couvrant 5 ms → 5 s.
+#   - Le seuil SLO planning (500 ms = 0.5 s) est une frontière EXACTE (le="0.5").
+#   - Runtime Python/FastAPI : overhead ASGI → seuil SLO plus haut qu'annuaire.
+#   Valeurs : 5ms, 10ms, 25ms, 50ms, 100ms, 200ms, 300ms, 500ms, 1s, 2s, 5s
+metrics:
+  buckets: "0.005,0.01,0.025,0.05,0.1,0.2,0.3,0.5,1,2,5"
+  businessEnabled: false
+
+monitoring:
+  enabled: false
+  serviceMonitor:
+    interval: 30s
+    release: kps
+
+# Étape 5 : useDeployment passe à false — le Rollout remplace le Deployment.
+useDeployment: false
+
+# ── Configuration du Rollout Canary (Étape 5) ────────────────────────────────
+rollout:
+  revisionHistoryLimit: 3
+  canary:
+    pauseDuration: "0"
+    maxSurge: "1"
+    maxUnavailable: "0"
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+
+probes:
+  readiness:
+    path: /readyz
+    initialDelaySeconds: 2
+    periodSeconds: 5
+  liveness:
+    path: /healthz
+    initialDelaySeconds: 10
+    periodSeconds: 10

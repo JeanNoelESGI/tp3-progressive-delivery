@@ -1,0 +1,104 @@
+{{- /*
+  rollout.yaml — Argo Rollout Blue/Green pour le service planning
+  Actif quand useDeployment: false (étape 5 et au-delà).
+
+  Stratégie Blue/Green (Étape 8) :
+    - Déploiement complet de la version de test (Green) en parallèle de la stable (Blue).
+    - Les deux versions tournent simultanément à pleine capacité (replicas: 2).
+    - Un Service `preview` pointe sur la version Green pour les tests internes ou l'analyse.
+    - Un Service `active` pointe sur la version stable Blue (actuellement en production).
+    - Une analyse de 2 minutes (`prePromotionAnalysis`) s'exécute sur le Service preview.
+    - Si l'analyse réussit, le trafic utilisateur principal bascule à 100% sur la Green.
+    - L'ancienne version stable (Blue) est conservée pendant 5 minutes (`scaleDownDelaySeconds: 300`)
+      après la bascule, permettant un rollback instantané.
+*/ -}}
+{{- if not .Values.useDeployment }}
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: {{ include "planning.fullname" . }}
+  labels:
+    {{- include "planning.labels" . | nindent 4 }}
+  annotations:
+    # Abonnement aux notifications (Étape 10)
+    notifications.argoproj.io/subscribe.on-rollout-completed.webhook-product: ""
+    notifications.argoproj.io/subscribe.on-rollout-aborted.webhook-primary: ""
+
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: {{ .Values.rollout.revisionHistoryLimit | default 3 }}
+  selector:
+    matchLabels:
+      {{- include "planning.selectorLabels" . | nindent 6 }}
+
+  template:
+    metadata:
+      labels:
+        {{- include "planning.labels" . | nindent 8 }}
+    spec:
+      securityContext:
+        runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+      containers:
+        - name: planning
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+          env:
+            - name: PORT
+              value: {{ .Values.service.targetPort | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.env.LOG_LEVEL | quote }}
+            - name: METRICS_BUCKETS
+              value: {{ .Values.metrics.buckets | quote }}
+            - name: METRICS_BUSINESS_ENABLED
+              value: {{ .Values.metrics.businessEnabled | quote }}
+            - name: VERSION
+              value: {{ .Chart.AppVersion | quote }}
+            - name: COMMIT
+              value: {{ .Values.image.tag | quote }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            readOnlyRootFilesystem: {{ .Values.securityContext.readOnlyRootFilesystem }}
+            allowPrivilegeEscalation: {{ .Values.securityContext.allowPrivilegeEscalation }}
+            capabilities:
+              {{- toYaml .Values.securityContext.capabilities | nindent 14 }}
+
+  strategy:
+    blueGreen:
+      # Service actif (stable) servant le trafic de production
+      activeService: {{ include "planning.fullname" . }}-active
+      # Service preview servant à l'inspection de la nouvelle version avant bascule
+      previewService: {{ include "planning.fullname" . }}-preview
+
+      # Conserver les anciens pods stables pendant 300 secondes (5 min) après promotion
+      # pour permettre un rollback instantané en un clic.
+      scaleDownDelaySeconds: 300
+
+      # Auto-promotion activée : si l'analyse réussit, la version est promue automatiquement
+      autoPromotionEnabled: true
+
+      # Analyse de pré-promotion de 2 minutes
+      prePromotionAnalysis:
+        templates:
+          - templateName: {{ include "planning.fullname" . }}-analysis
+        args:
+          - name: preview-hash
+            valueFrom:
+              podTemplateHashValue: Latest
+{{- end }}

@@ -1,0 +1,41 @@
+# =============================================================================
+# dashboards.yaml — Application ArgoCD pour les dashboards Grafana
+# Namespace : argocd
+#
+# Déploie les ConfigMap de dashboards dans le namespace `monitoring`.
+# Le sidecar Grafana les détecte grâce au label `grafana_dashboard: "1"`
+# et les importe automatiquement sans redémarrage du pod Grafana.
+#
+# Étape 4 du TP.
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dashboards
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: devhub
+
+  source:
+    # TODO : remplacez par l'URL HTTPS de votre fork.
+    repoURL: https://github.com/JeanNoelESGI/tp3-progressive-delivery.git
+    targetRevision: main
+    path: pulse-campus/platform-sre/dashboards
+
+    directory:
+      recurse: false
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+
+  syncPolicy:
+    automated:
+      prune: true      # supprime les dashboards retirés du repo
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

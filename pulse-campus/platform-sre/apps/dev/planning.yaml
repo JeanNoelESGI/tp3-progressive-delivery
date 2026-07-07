@@ -1,0 +1,35 @@
+# Application ArgoCD : planning-dev
+#
+# Déploie le chart Helm de services/planning/chart dans le namespace devhub-dev.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: planning-dev
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: devhub
+
+  source:
+    # URL de votre fork.
+    repoURL: https://github.com/JeanNoelESGI/tp3-progressive-delivery.git
+    targetRevision: main
+    path: pulse-campus/services/planning/chart
+
+    helm:
+      valueFiles:
+        - values-dev.yaml
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: devhub-dev
+
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

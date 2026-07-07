@@ -1,0 +1,47 @@
+{{- if .Values.ingress.enabled }}
+# ── Ingress Principal (Trafic Public / Actif) ────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "planning.fullname" . }}
+  labels:
+    {{- include "planning.labels" . | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: {{ .Values.ingress.path }}
+            pathType: Prefix
+            backend:
+              service:
+                # Backend pointe sur le Service ACTIVE (géré par Argo Rollouts)
+                name: {{ include "planning.fullname" . }}-active
+                port:
+                  number: {{ .Values.service.port }}
+
+---
+
+# ── Ingress Preview (Trafic Interne / Analyse) ────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "planning.fullname" . }}-preview
+  labels:
+    {{- include "planning.labels" . | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: "planning-preview.devhub.local" # Hôte privé pour l'équipe interne
+      http:
+        paths:
+          - path: {{ .Values.ingress.path }}
+            pathType: Prefix
+            backend:
+              service:
+                # Backend pointe sur le Service PREVIEW (nouvelle version Green)
+                name: {{ include "planning.fullname" . }}-preview
+                port:
+                  number: {{ .Values.service.port }}
+{{- end }}

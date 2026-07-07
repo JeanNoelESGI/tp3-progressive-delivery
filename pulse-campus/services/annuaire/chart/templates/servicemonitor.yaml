@@ -1,0 +1,45 @@
+{{- /*
+  ServiceMonitor — annuaire
+  Activé via monitoring.enabled: true dans values.yaml (ou values-dev.yaml).
+
+  PRÉREQUIS :
+    - Le label `release: kps` posé sur ce ServiceMonitor DOIT correspondre
+      au serviceMonitorSelector.matchLabels du chart kube-prometheus-stack.
+      Sans ce label, Prometheus ignore silencieusement ce ServiceMonitor.
+    - Le Service annuaire doit exposer le port nommé `http` (cf. service.yaml).
+
+  CARDINALITÉ :
+    - L'endpoint /metrics expose uniquement des séries avec label `status_class`
+      (et non le code HTTP brut) — cardinalité maîtrisée dès la source.
+    - Le scrape interval (30s) est aligné sur le scrape global de Prometheus
+      et sur l'interval des recording rules.
+*/ -}}
+{{- if .Values.monitoring.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "annuaire.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "annuaire.labels" . | nindent 4 }}
+    # OBLIGATOIRE — doit correspondre au serviceMonitorSelector.matchLabels
+    # configuré dans kube-prometheus-stack-values.yaml (release: kps).
+    release: {{ .Values.monitoring.serviceMonitor.release | quote }}
+spec:
+  # Sélectionne le Service annuaire dans le même namespace que le ServiceMonitor.
+  selector:
+    matchLabels:
+      {{- include "annuaire.selectorLabels" . | nindent 6 }}
+  # Limite la découverte au namespace de déploiement (évite les faux positifs).
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: http                          # Doit correspondre au nom du port dans service.yaml
+      path: /metrics
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+      scrapeTimeout: 10s
+      # honorLabels: false → Prometheus ajoute ses propres labels (job, instance)
+      # sans être écrasé par ceux exportés depuis l'application.
+      honorLabels: false
+{{- end }}

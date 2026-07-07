@@ -1,0 +1,58 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ include "planning.fullname" . }}-analysis
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "planning.labels" . | nindent 4 }}
+spec:
+  args:
+    - name: preview-hash
+  metrics:
+    # ── Métrique 1 : Taux d'erreur 5xx (SLO Disponibilité) ────────────────────
+    - name: error-rate
+      interval: 30s
+      count: 4 # 4 mesures toutes les 30s = 2 minutes d'analyse avant promotion
+      successCondition: result[0] < 0.01
+      failureLimit: 0
+      provider:
+        prometheus:
+          address: http://prometheus-operated.monitoring.svc.cluster.local:9090
+          query: |
+            (
+              sum(rate(http_requests_total{
+                job="planning",
+                status_class="5xx",
+                rollouts_pod_template_hash="{{args.preview-hash}}",
+                route!~"/healthz|/readyz|/metrics"
+              }[2m]))
+              /
+              sum(rate(http_requests_total{
+                job="planning",
+                rollouts_pod_template_hash="{{args.preview-hash}}",
+                route!~"/healthz|/readyz|/metrics"
+              }[2m]))
+            ) or vector(0)
+
+    # ── Métrique 2 : Latence p95 (SLO Performance) ───────────────────────────
+    - name: latency-p95
+      interval: 30s
+      count: 4
+      successCondition: result[0] < 0.5 # Seuil SLO planning = 500 ms (0.5 s)
+      failureLimit: 0
+      provider:
+        prometheus:
+          address: http://prometheus-operated.monitoring.svc.cluster.local:9090
+          query: |
+            (
+              histogram_quantile(
+                0.95,
+                sum by (le) (
+                  rate(http_request_duration_seconds_bucket{
+                    job="planning",
+                    rollouts_pod_template_hash="{{args.preview-hash}}",
+                    route!~"/healthz|/readyz|/metrics"
+                  }[2m])
+                )
+              )
+            ) or vector(0)

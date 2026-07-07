@@ -1,0 +1,99 @@
+# Values par défaut du chart annuaire.
+# Surchargées par values-dev.yaml selon l'environnement.
+
+image:
+  repository: ghcr.io/changeme/annuaire
+  tag: dev
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+
+ingress:
+  enabled: true
+  className: nginx
+  host: annuaire.devhub.local
+  path: /
+
+env:
+  LOG_LEVEL: info
+
+# Métriques Prometheus — paramètres injectés au pod via variables d'environnement.
+#
+# Buckets logarithmiques (Étape 2) :
+#   - Progression quasi-logarithmique couvrant 5 ms → 5 s.
+#   - Le seuil SLO annuaire (300 ms = 0.3 s) est une frontière EXACTE du bucket
+#     (le="0.3"). Sans cela, `histogram_quantile` interpole et le SLI bucket-based
+#     est approximatif. Idem pour le="0.2" et le="0.5" utilisés dans le dashboard.
+#   - 11 buckets → cardinalité raisonnable (~11 séries par label-set route×method×status_class).
+#   Valeurs : 5ms, 10ms, 25ms, 50ms, 100ms, 200ms, 300ms, 500ms, 1s, 2s, 5s
+metrics:
+  buckets: "0.005,0.01,0.025,0.05,0.1,0.2,0.3,0.5,1,2,5"
+  businessEnabled: false
+
+# Sera passé à true en étape 4 (ServiceMonitor activé).
+monitoring:
+  enabled: false
+  serviceMonitor:
+    interval: 30s
+    # Doit correspondre au releaseName du chart kube-prometheus-stack.
+    release: kps
+
+# Tant que le Rollout n'est pas écrit (étape 5), le chart garde un Deployment
+# de secours pour démarrer. Passez à false dès que rollout.yaml est en place.
+# Étape 5 : useDeployment passe à false — le Rollout remplace le Deployment.
+# Ne repassez JAMAIS à true sans supprimer d'abord le Rollout (conflit de selector).
+useDeployment: false
+
+# ── Configuration du Rollout Canary (Étape 5) ────────────────────────────────
+rollout:
+  revisionHistoryLimit: 3
+  canary:
+    # Durée des pauses entre les paliers.
+    # "0" = pause manuelle (l'opérateur doit taper `kubectl argo rollouts promote`).
+    # Exemple : "5m" = promotion automatique après 5 minutes.
+    # En étape 7, les pauses seront remplacées par des AnalysisRun automatiques.
+    pauseDuration: "0"
+    # maxSurge : nombre maximum de pods supplémentaires pendant la transition.
+    maxSurge: "1"
+    # maxUnavailable : pas de pod indisponible pendant le déploiement.
+    maxUnavailable: "0"
+
+    # ── Routage par Header HTTP (Étape 9) ────────────────────────────────────
+    # Si activé, redirige tout le trafic contenant l'en-tête spécifié
+    # vers la version Canary, sans interagir avec la répartition par poids.
+    headerRouting:
+      enabled: true
+      header: "X-Beta-User"
+      value: "true"
+
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+
+probes:
+  readiness:
+    path: /readyz
+    initialDelaySeconds: 2
+    periodSeconds: 5
+  liveness:
+    path: /healthz
+    initialDelaySeconds: 10
+    periodSeconds: 10

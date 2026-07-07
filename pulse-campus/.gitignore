@@ -1,0 +1,39 @@
+# Artefacts locaux
+.DS_Store
+*.log
+*.tmp
+*.swp
+
+# Build artefacts
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+dist/
+build/
+
+# Go
+/bin/
+vendor/
+
+# Outils
+.idea/
+.vscode/
+*.iml
+
+# Helm
+charts/*.tgz
+
+# ── Sécurité — NE JAMAIS committer de secrets en clair ───────────────────────
+# Le fichier grafana-admin-secret.yaml EST dans Git uniquement comme TEMPLATE
+# (avec CHANGEME_BASE64). Si vous le remplissez avec de vraies valeurs,
+# renommez-le en *.secret.yaml pour qu'il soit ignoré.
+*.secret.yaml
+platform-sre/secrets/*-real.yaml
+
+# Kubeconfig et tokens locaux
+kubeconfig
+.kubeconfig
+*.token
+argocd-token.txt

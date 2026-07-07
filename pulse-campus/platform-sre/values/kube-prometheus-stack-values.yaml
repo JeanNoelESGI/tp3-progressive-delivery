@@ -1,0 +1,237 @@
+# =============================================================================
+# kube-prometheus-stack-values.yaml — TP3 Progressive Delivery
+# Chart : prometheus-community/kube-prometheus-stack  v65.5.0
+# Namespace cible : monitoring
+# ReleaseName : kps  (tous les labels `release: kps` référencent ce nom)
+#
+# SÉCURITÉ : le mot de passe Grafana N'EST PAS stocké ici en clair.
+# Créez le Secret AVANT la première sync ArgoCD :
+#
+#   kubectl create secret generic grafana-admin-secret \
+#     --namespace monitoring \
+#     --from-literal=admin-user=admin \
+#     --from-literal=admin-password='<VotreMotDePasse>'
+#
+# En production : utilisez Sealed Secrets ou External Secrets Operator.
+# =============================================================================
+
+fullnameOverride: kps
+
+# ── Grafana ──────────────────────────────────────────────────────────────────
+grafana:
+  enabled: true
+
+  # Référence au Secret Kubernetes (créé manuellement avant la sync).
+  # N'utilisez JAMAIS adminPassword: "xxx" en production ou dans Git.
+  admin:
+    existingSecret: grafana-admin-secret
+    userKey: admin-user
+    passwordKey: admin-password
+
+  defaultDashboardsTimezone: browser
+
+  # Ingress — accessible via http://grafana.devhub.local (entrée dans /etc/hosts)
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hosts:
+      - grafana.devhub.local
+    path: /
+    pathType: Prefix
+
+  # Auto-discovery des dashboards en ConfigMap portant le label grafana_dashboard=1.
+  # searchNamespace: ALL permet de charger les CM de tous les namespaces
+  # (monitoring, devhub-dev, etc.) sans avoir à lister chaque namespace.
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+    datasources:
+      enabled: true
+
+  # Resources légères pour Kind 2 nœuds
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+
+  # Désactivation des tests Helm (inutiles en TP, évitent des RBAC supplémentaires)
+  testFramework:
+    enabled: false
+
+# ── Prometheus ───────────────────────────────────────────────────────────────
+prometheus:
+  enabled: true
+
+  # Ingress — accessible via http://prometheus.devhub.local
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hosts:
+      - prometheus.devhub.local
+    paths:
+      - /
+    pathType: Prefix
+
+  prometheusSpec:
+    # Rétention courte pour le TP (adaptez si vous gardez le cluster > 2 semaines)
+    retention: 15d
+
+    # EmptyDir suffit pour le TP (pas de PVC requis).
+    # En production : utilisez un PVC StorageClass = "standard" ou "fast".
+    storageSpec: {}
+
+    # ── Sélection des ServiceMonitor ────────────────────────────────────────
+    # serviceMonitorSelectorNilUsesHelmValues: false → Prometheus ignore les
+    # valeurs par défaut du chart et utilise UNIQUEMENT notre sélecteur.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelector:
+      matchLabels:
+        release: kps          # doit correspondre au label posé sur chaque ServiceMonitor
+    # Scanne tous les namespaces (devhub-dev, monitoring, argo-rollouts…)
+    serviceMonitorNamespaceSelector: {}
+
+    # ── Sélection des PodMonitor ─────────────────────────────────────────────
+    podMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelector: {}
+    podMonitorNamespaceSelector: {}
+
+    # ── Sélection des PrometheusRule ─────────────────────────────────────────
+    ruleSelectorNilUsesHelmValues: false
+    ruleSelector:
+      matchLabels:
+        release: kps          # doit correspondre au label posé sur chaque PrometheusRule
+    ruleNamespaceSelector: {}
+
+    # Resources légères pour Kind 2 nœuds
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+
+    # Scrape interval global — doit correspondre au `interval` des recording rules
+    # (30s dans recording-rules.yaml)
+    scrapeInterval: 30s
+    evaluationInterval: 30s
+
+# ── Alertmanager ─────────────────────────────────────────────────────────────
+alertmanager:
+  enabled: true
+
+  # Ingress Alertmanager (optionnel — utile pour tester amtool en local)
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hosts:
+      - alertmanager.devhub.local
+    path: /
+    pathType: Prefix
+
+  alertmanagerSpec:
+    # Resources minimales pour Kind
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+
+  # La configuration complète (routes, receivers, webhooks) de l'étape 10.
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      group_by: ['alertname', 'job', 'namespace']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      receiver: 'null'
+      routes:
+        # ── Route 1 : sévérité page (critique, réveille le SRE) ─────────────
+        - matchers:
+            - severity = page
+          receiver: 'webhook-primary'
+        # ── Route 2 : sévérité ticket (non-urgent, attend le lundi) ─────────
+        - matchers:
+            - severity = ticket
+          receiver: 'webhook-secondary'
+    receivers:
+      - name: 'null'
+      # Webhook Primaire (Page) — remplacez par votre vrai URL webhook.site
+      - name: 'webhook-primary'
+        webhook_configs:
+          - url: 'https://webhook.site/placeholder-primary-sre-url'
+            send_resolved: true
+      # Webhook Secondaire (Ticket) — remplacez par votre vrai URL webhook.site
+      - name: 'webhook-secondary'
+        webhook_configs:
+          - url: 'https://webhook.site/placeholder-secondary-sre-url'
+            send_resolved: true
+
+
+# ── Désactivation des targets control-plane — incompatibles avec Kind ────────
+#
+# Kind ne fournit PAS les endpoints standards de la control plane
+# (10251, 10252, 10259…). Si activés, Prometheus aurait des cibles DOWN
+# en permanence et les alertes KubeControllerManagerDown se déclencheraient.
+#
+kubeControllerManager:
+  enabled: false
+
+kubeScheduler:
+  enabled: false
+
+kubeEtcd:
+  enabled: false
+
+# kubeProxy est désactivé car Kind utilise iptables-legacy sans proxy dédié.
+kubeProxy:
+  enabled: false
+
+# ── Prometheus Operator ───────────────────────────────────────────────────────
+#
+# En cluster local Kind, le webhook admission peut bloquer l'installation
+# si le cert-manager n'est pas présent. On désactive entièrement les webhooks.
+# EN PRODUCTION : réactivez-les (sécurité).
+#
+prometheusOperator:
+  admissionWebhooks:
+    enabled: false
+    patch:
+      enabled: false
+  # TLS désactivé pour le TP (le webhook ne peut pas être patché sans cert-manager)
+  tls:
+    enabled: false
+
+# ── kube-state-metrics ───────────────────────────────────────────────────────
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+# ── node-exporter ────────────────────────────────────────────────────────────
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+  # Tolerations pour que node-exporter tourne aussi sur le control-plane Kind
+  tolerations:
+    - effect: NoSchedule
+      operator: Exists

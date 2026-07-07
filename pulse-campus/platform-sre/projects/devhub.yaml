@@ -1,0 +1,93 @@
+# =============================================================================
+# devhub.yaml — AppProject ArgoCD pour le TP 3 Progressive Delivery
+# Namespace : argocd
+#
+# Élargi par rapport au TP 2 pour couvrir :
+#   - kube-prometheus-stack : CRDs monitoring.coreos.com, ClusterRole, Webhook…
+#   - argo-rollouts : CRDs argoproj.io, ClusterRole, ClusterRoleBinding…
+#   - namespaces applicatifs dev (devhub-dev)
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: devhub
+  namespace: argocd
+  # Finalizer : empêche la suppression du projet si des Applications en dépendent.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: Plateforme DevHub Campus SRE (TP 3 — Progressive Delivery)
+
+  # Repos source autorisés.
+  # TODO : remplacez "*" par l'URL HTTPS de votre fork pour limiter la surface d'attaque.
+  sourceRepos:
+    - "https://prometheus-community.github.io/helm-charts"
+    - "https://argoproj.github.io/argo-helm"
+    - "https://kubernetes.github.io/ingress-nginx"
+    # URL de votre fork
+    - "https://github.com/JeanNoelESGI/tp3-progressive-delivery.git"
+    - "https://github.com/JeanNoelESGI/tp3-progressive-delivery"
+
+    # Wildcard pour le TP (à restreindre en production)
+    - "*"
+
+  # Namespaces de destination autorisés.
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: devhub-dev
+    - server: https://kubernetes.default.svc
+      namespace: monitoring
+    - server: https://kubernetes.default.svc
+      namespace: argo-rollouts
+    - server: https://kubernetes.default.svc
+      namespace: argocd
+    - server: https://kubernetes.default.svc
+      namespace: ingress-nginx
+
+  # ── Ressources cluster-scoped whitelistées ────────────────────────────────
+  # kube-prometheus-stack et argo-rollouts créent de nombreuses ressources
+  # cluster-scoped. Sans whitelist, ArgoCD refuse de les créer.
+  clusterResourceWhitelist:
+    # Namespaces (CreateNamespace=true dans syncOptions)
+    - group: ""
+      kind: Namespace
+
+    # CRDs posées par kube-prometheus-stack et argo-rollouts
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+
+    # RBAC cluster-wide (kube-prometheus-stack, argo-rollouts)
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+
+    # Webhooks (kube-prometheus-stack — prometheusOperator)
+    # Désactivés en values (admissionWebhooks.enabled: false) mais ArgoCD
+    # doit pouvoir gérer les ressources si elles existent déjà.
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+
+    # PodSecurityPolicy (versions antérieures à k8s 1.25)
+    - group: policy
+      kind: PodSecurityPolicy
+
+    # StorageClass (si PVC activé en production)
+    - group: storage.k8s.io
+      kind: StorageClass
+
+  # Toutes les ressources namespace-scoped sont autorisées (TP).
+  # En production : restreignez par group/kind.
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+
+  # Rôles de projet (optionnel pour le TP — utile en équipe)
+  # roles:
+  #   - name: developer
+  #     description: Lecture seule sur les Applications
+  #     policies:
+  #       - p, proj:devhub:developer, applications, get, devhub/*, allow

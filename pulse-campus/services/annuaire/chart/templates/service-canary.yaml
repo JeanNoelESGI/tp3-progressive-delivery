@@ -1,0 +1,32 @@
+{{- /*
+  service-canary.yaml — Service "Canary" pour le trafic Argo Rollouts.
+
+  Ce Service est référencé par le Rollout comme `canaryService`.
+  Argo Rollouts gère son sélecteur automatiquement :
+    - Pendant un rollout : sélectionne UNIQUEMENT les pods avec le hash
+      de la révision CANARY (rollouts-pod-template-hash = <hash-canary>).
+    - Avant un rollout : aucun pod sélectionné (selector pointe sur un hash inexistant).
+
+  FILTRAGE MÉTRIQUES :
+    La métrique http_requests_total des pods Canary portera le label
+    rollouts_pod_template_hash="<HASH_CANARY>" permettant d'isoler
+    les métriques Canary dans les AnalysisTemplate et le dashboard Grafana.
+*/ -}}
+{{- if not .Values.useDeployment }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "annuaire.fullname" . }}-canary
+  labels:
+    {{- include "annuaire.labels" . | nindent 4 }}
+    app.kubernetes.io/component: canary
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "annuaire.selectorLabels" . | nindent 4 }}
+{{- end }}

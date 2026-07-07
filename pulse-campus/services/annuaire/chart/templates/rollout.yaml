@@ -1,0 +1,126 @@
+{{- /*
+  rollout.yaml — Argo Rollout Canary pour le service annuaire
+  Actif quand useDeployment: false (étape 5 et au-delà).
+
+  Stratégie canary à 4 paliers :
+    1. 20 % → pause manuelle (ou analyse automatique en étape 7)
+    2. 40 % → pause manuelle
+    3. 60 % → pause manuelle
+    4. 100 % → promotion automatique (si aucune AbortCondition ne s'est déclenchée)
+
+  Services de trafic :
+    - stableService    : annuaire-stable   → pods stable uniquement
+    - canaryService    : annuaire-canary   → pods canary uniquement
+    Les deux sont redirigés vers le même Service principal (annuaire-annuaire)
+    pour les requêtes non-partitionnées.
+
+  Anti-dilution métriques (cf. étape 1 RAPPORT.md) :
+    Argo Rollouts injecte automatiquement le label `rollouts-pod-template-hash`
+    sur chaque pod (Stable et Canary). Ce label est utilisé dans les
+    AnalysisTemplate (étape 7) pour filtrer les métriques par population.
+*/ -}}
+{{- if not .Values.useDeployment }}
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: {{ include "annuaire.fullname" . }}
+  labels:
+    {{- include "annuaire.labels" . | nindent 4 }}
+  annotations:
+    # Abonnement aux notifications (Étape 10)
+    notifications.argoproj.io/subscribe.on-rollout-completed.webhook-product: ""
+    notifications.argoproj.io/subscribe.on-rollout-aborted.webhook-primary: ""
+
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: {{ .Values.rollout.revisionHistoryLimit | default 3 }}
+  selector:
+    matchLabels:
+      {{- include "annuaire.selectorLabels" . | nindent 6 }}
+
+  template:
+    metadata:
+      labels:
+        {{- include "annuaire.labels" . | nindent 8 }}
+    spec:
+      securityContext:
+        runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+      containers:
+        - name: annuaire
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+          env:
+            - name: PORT
+              value: {{ .Values.service.targetPort | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.env.LOG_LEVEL | quote }}
+            - name: METRICS_BUCKETS
+              value: {{ .Values.metrics.buckets | quote }}
+            - name: METRICS_BUSINESS_ENABLED
+              value: {{ .Values.metrics.businessEnabled | quote }}
+            - name: VERSION
+              value: {{ .Chart.AppVersion | quote }}
+            - name: COMMIT
+              value: {{ .Values.image.tag | quote }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            readOnlyRootFilesystem: {{ .Values.securityContext.readOnlyRootFilesystem }}
+            allowPrivilegeEscalation: {{ .Values.securityContext.allowPrivilegeEscalation }}
+            capabilities:
+              {{- toYaml .Values.securityContext.capabilities | nindent 14 }}
+
+  strategy:
+    canary:
+      # Services distincts Stable / Canary.
+      # Permettent un filtrage propre des métriques par rollouts-pod-template-hash.
+      stableService: {{ include "annuaire.fullname" . }}-stable
+      canaryService: {{ include "annuaire.fullname" . }}-canary
+
+      # Contrôleur de trafic — utilise l'Ingress nginx existant.
+      # Argo Rollouts duplique l'Ingress et y ajoute un poids canary.
+      trafficRouting:
+        nginx:
+          stableIngress: {{ include "annuaire.fullname" . }}
+          {{- if .Values.rollout.canary.headerRouting.enabled }}
+          additionalIngressAnnotations:
+            canary-by-header: {{ .Values.rollout.canary.headerRouting.header | quote }}
+            canary-by-header-value: {{ .Values.rollout.canary.headerRouting.value | quote }}
+          {{- end }}
+
+
+      steps:
+        # Palier 1 : Envoi de 25 % du trafic sur le Canary
+        - setWeight: 25
+        # Analyse automatique (5 minutes de test, mesures toutes les 30s)
+        - analysis:
+            templates:
+              - templateName: {{ include "annuaire.fullname" . }}-analysis
+            args:
+              - name: canary-hash
+                valueFrom:
+                  podTemplateHashValue: Latest
+
+        # Palier 2 : Envoi de 50 % du trafic sur le Canary, pause de 1 minute
+        - setWeight: 50
+        - pause:
+            duration: 1m
+{{- end }}
+
+

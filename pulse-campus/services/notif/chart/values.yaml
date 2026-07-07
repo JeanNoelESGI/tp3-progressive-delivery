@@ -1,0 +1,67 @@
+# Values par défaut du chart notif.
+
+image:
+  repository: ghcr.io/changeme/notif
+  tag: dev
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+
+ingress:
+  enabled: true
+  className: nginx
+  host: notif.devhub.local
+  path: /
+
+env:
+  LOG_LEVEL: info
+
+# Métriques Prometheus — paramètres injectés au pod via variables d'environnement.
+#
+# Buckets logarithmiques (Étape 2) :
+#   - Progression quasi-logarithmique couvrant 5 ms → 5 s.
+#   - Le seuil SLO notif (200 ms = 0.2 s) est une frontière EXACTE (le="0.2").
+#   - Runtime Go net/http : le plus léger → SLO latence le plus strict des 3 services.
+#   Valeurs : 5ms, 10ms, 25ms, 50ms, 100ms, 200ms, 300ms, 500ms, 1s, 2s, 5s
+metrics:
+  buckets: "0.005,0.01,0.025,0.05,0.1,0.2,0.3,0.5,1,2,5"
+  businessEnabled: false
+
+monitoring:
+  enabled: false
+  serviceMonitor:
+    interval: 30s
+    release: kps
+
+useDeployment: true
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 32Mi
+  limits:
+    cpu: 100m
+    memory: 64Mi
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+
+probes:
+  readiness:
+    path: /readyz
+    initialDelaySeconds: 2
+    periodSeconds: 5
+  liveness:
+    path: /healthz
+    initialDelaySeconds: 10
+    periodSeconds: 10
