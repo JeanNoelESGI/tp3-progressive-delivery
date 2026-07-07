@@ -6,7 +6,8 @@ metadata:
   labels:
     # Label détecté par le sidecar Grafana (cf. kube-prometheus-stack-values.yaml)
     grafana_dashboard: "1"
-    grafana_dashboard_folder: "Pulse Campus"
+    grafana_dashboard_folder: "Pulse-Campus"
+
     app.kubernetes.io/part-of: devhub-campus
     app.kubernetes.io/component: grafana-dashboard
 data:

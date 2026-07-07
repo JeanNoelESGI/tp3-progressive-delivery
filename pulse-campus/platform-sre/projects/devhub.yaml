@@ -44,6 +44,9 @@ spec:
       namespace: argocd
     - server: https://kubernetes.default.svc
       namespace: ingress-nginx
+    - server: https://kubernetes.default.svc
+      namespace: kube-system
+
 
   # ── Ressources cluster-scoped whitelistées ────────────────────────────────
   # kube-prometheus-stack et argo-rollouts créent de nombreuses ressources

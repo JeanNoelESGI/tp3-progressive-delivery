@@ -21,59 +21,56 @@ notifications:
     create: true
   configmap:
     create: true
-  notifiers:
-    webhook:
-      # Webhook primaire (Page) pour les échecs
-      webhook-primary:
+    data:
+      # Configurations des intégrations webhook
+      service.webhook.webhook-primary: |
         url: https://webhook.site/placeholder-primary-rollouts-url
         headers:
           - name: Content-Type
             value: application/json
-      # Webhook produit (Releases) pour les succès
-      webhook-product:
+      service.webhook.webhook-product: |
         url: https://webhook.site/placeholder-product-rollouts-url
         headers:
           - name: Content-Type
             value: application/json
-  templates:
-    # Notification en cas de succès (Promoted)
-    rollout-success:
-      webhook:
-        webhook-product:
-          method: POST
-          body: |
-            {
-              "rollout": "{{.rollout.metadata.name}}",
-              "conclusion": "Promoted",
-              "phase": "{{.rollout.status.phase}}",
-              "image": "{{(index .rollout.spec.template.spec.containers 0).image}}",
-              "stable_revision": "{{.rollout.status.stableRS}}",
-              "duration": "5 minutes (analysis + pauses)"
-            }
-    # Notification en cas d'échec (Aborted / Rollback)
-    rollout-failure:
-      webhook:
-        webhook-primary:
-          method: POST
-          body: |
-            {
-              "rollout": "{{.rollout.metadata.name}}",
-              "conclusion": "Aborted",
-              "phase": "{{.rollout.status.phase}}",
-              "image": "{{(index .rollout.spec.template.spec.containers 0).image}}",
-              "stable_revision": "{{.rollout.status.stableRS}}",
-              "failed_revision": "{{.rollout.status.currentPodHash}}",
-              "duration": "analysis failed (auto-rollback triggered)"
-            }
-  triggers:
-    # Déclenché quand le Rollout devient Healthy après avoir complété toutes ses étapes
-    on-rollout-completed:
-      - send: [rollout-success]
-        when: rollout.status.phase == "Healthy"
-    # Déclenché quand le Rollout passe en Degraded suite à une annulation (abort)
-    on-rollout-aborted:
-      - send: [rollout-failure]
-        when: rollout.status.phase == "Degraded"
+
+      # Templates de message JSON envoyés
+      template.rollout-success: |
+        webhook:
+          webhook-product:
+            method: POST
+            body: |
+              {
+                "rollout": "{{.rollout.metadata.name}}",
+                "conclusion": "Promoted",
+                "phase": "{{.rollout.status.phase}}",
+                "image": "{{(index .rollout.spec.template.spec.containers 0).image}}",
+                "stable_revision": "{{.rollout.status.stableRS}}",
+                "duration": "5 minutes (analysis + pauses)"
+              }
+      template.rollout-failure: |
+        webhook:
+          webhook-primary:
+            method: POST
+            body: |
+              {
+                "rollout": "{{.rollout.metadata.name}}",
+                "conclusion": "Aborted",
+                "phase": "{{.rollout.status.phase}}",
+                "image": "{{(index .rollout.spec.template.spec.containers 0).image}}",
+                "stable_revision": "{{.rollout.status.stableRS}}",
+                "failed_revision": "{{.rollout.status.currentPodHash}}",
+                "duration": "analysis failed (auto-rollback triggered)"
+              }
+
+      # Déclencheurs (triggers) basés sur le statut
+      trigger.on-rollout-completed: |
+        - send: [rollout-success]
+          when: rollout.status.phase == "Healthy"
+      trigger.on-rollout-aborted: |
+        - send: [rollout-failure]
+          when: rollout.status.phase == "Degraded"
+
 
 
 # En kind, gardez les ressources légères.
