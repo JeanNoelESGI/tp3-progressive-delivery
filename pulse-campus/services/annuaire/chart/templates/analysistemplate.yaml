@@ -27,13 +27,14 @@ spec:
               sum(rate(http_requests_total{
                 job="annuaire",
                 status_class="5xx",
-                rollouts_pod_template_hash="{{args.canary-hash}}",
+                rollouts_pod_template_hash="{{ "{{args.canary-hash}}" }}",
                 route!~"/healthz|/readyz|/metrics"
               }[2m]))
               /
               sum(rate(http_requests_total{
                 job="annuaire",
-                rollouts_pod_template_hash="{{args.canary-hash}}",
+                rollouts_pod_template_hash="{{ "{{args.canary-hash}}" }}",
+
                 route!~"/healthz|/readyz|/metrics"
               }[2m]))
             ) or vector(0)
@@ -55,7 +56,7 @@ spec:
                 sum by (le) (
                   rate(http_request_duration_seconds_bucket{
                     job="annuaire",
-                    rollouts_pod_template_hash="{{args.canary-hash}}",
+                    rollouts_pod_template_hash="{{ "{{args.canary-hash}}" }}",
                     route!~"/healthz|/readyz|/metrics"
                   }[2m])
                 )

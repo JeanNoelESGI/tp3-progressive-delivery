@@ -23,13 +23,14 @@ spec:
               sum(rate(http_requests_total{
                 job="planning",
                 status_class="5xx",
-                rollouts_pod_template_hash="{{args.preview-hash}}",
+                rollouts_pod_template_hash="{{ "{{args.preview-hash}}" }}",
                 route!~"/healthz|/readyz|/metrics"
               }[2m]))
               /
               sum(rate(http_requests_total{
                 job="planning",
-                rollouts_pod_template_hash="{{args.preview-hash}}",
+                rollouts_pod_template_hash="{{ "{{args.preview-hash}}" }}",
+
                 route!~"/healthz|/readyz|/metrics"
               }[2m]))
             ) or vector(0)
@@ -50,7 +51,8 @@ spec:
                 sum by (le) (
                   rate(http_request_duration_seconds_bucket{
                     job="planning",
-                    rollouts_pod_template_hash="{{args.preview-hash}}",
+                    rollouts_pod_template_hash="{{ "{{args.preview-hash}}" }}",
+
                     route!~"/healthz|/readyz|/metrics"
                   }[2m])
                 )
