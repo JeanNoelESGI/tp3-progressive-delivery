@@ -30,10 +30,12 @@ data:
             "label": "Datasource",
             "type": "datasource",
             "pluginId": "prometheus",
+            "query": "prometheus",
             "multi": false,
             "includeAll": false,
             "hide": 0
           },
+
           {
             "name": "job",
             "label": "Service",
