@@ -26,6 +26,7 @@ metadata:
     # configuré dans kube-prometheus-stack-values.yaml (release: kps).
     release: {{ .Values.monitoring.serviceMonitor.release | quote }}
 spec:
+  jobLabel: app.kubernetes.io/name
   # Sélectionne le Service annuaire dans le même namespace que le ServiceMonitor.
   selector:
     matchLabels:

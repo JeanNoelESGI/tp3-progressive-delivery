@@ -15,7 +15,9 @@ metadata:
     {{- include "planning.labels" . | nindent 4 }}
     release: {{ .Values.monitoring.serviceMonitor.release | quote }}
 spec:
+  jobLabel: app.kubernetes.io/name
   selector:
+
     matchLabels:
       {{- include "planning.selectorLabels" . | nindent 6 }}
   namespaceSelector:
