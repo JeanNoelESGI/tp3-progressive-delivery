@@ -131,12 +131,13 @@ data:
           },
           "targets": [
             {
-              "expr": "sum(sli:http_request_error_ratio:rate5m{job=~\"$job\"}) / count(sli:http_request_error_ratio:rate5m{job=~\"$job\"})",
+              "expr": "(sum(sli:http_request_error_ratio:rate5m{job=~\"$job\"}) / count(sli:http_request_error_ratio:rate5m{job=~\"$job\"})) or vector(0)",
               "legendFormat": "Error ratio",
               "refId": "A"
             }
           ]
         },
+
 
         {
           "id": 4,
@@ -168,12 +169,13 @@ data:
           },
           "targets": [
             {
-              "expr": "slo:http_burn_rate_1h:annuaire",
+              "expr": "slo:http_burn_rate_1h:annuaire or vector(0)",
               "legendFormat": "BR 1h",
               "refId": "A"
             }
           ]
         },
+
 
         {
           "id": 5,
@@ -546,9 +548,10 @@ data:
             }
           },
           "targets": [
-            { "expr": "sli:http_latency_under_slo:annuaire", "legendFormat": "annuaire", "refId": "A", "instant": true }
+            { "expr": "(sli:http_latency_under_slo:annuaire) or vector(1)", "legendFormat": "annuaire", "refId": "A", "instant": true }
           ]
         },
+
 
         {
           "id": 42,
@@ -580,9 +583,10 @@ data:
             }
           },
           "targets": [
-            { "expr": "sli:http_latency_under_slo:planning", "legendFormat": "planning", "refId": "A", "instant": true }
+            { "expr": "(sli:http_latency_under_slo:planning) or vector(1)", "legendFormat": "planning", "refId": "A", "instant": true }
           ]
         },
+
 
         {
           "id": 43,
@@ -614,9 +618,10 @@ data:
             }
           },
           "targets": [
-            { "expr": "sli:http_latency_under_slo:notif", "legendFormat": "notif", "refId": "A", "instant": true }
+            { "expr": "(sli:http_latency_under_slo:notif) or vector(1)", "legendFormat": "notif", "refId": "A", "instant": true }
           ]
         }
+
 
       ]
     }
